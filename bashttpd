@@ -263,7 +263,7 @@ uri_kvpair_split() {
 		local Key=`echo $H | cut -f1 -d'='`
 		local Val=`echo $H | cut -f2 -d'='`
 		export API_PARAM_$Key=$Val
-		API_PARAMINDEX+="API_PARAM_$Key"
+		API_PARAMINDEX+=("API_PARAM_$Key")
 		uri_kvpair_split "$Tail"
 	fi
 }
