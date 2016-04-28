@@ -59,6 +59,9 @@ warn() { echo "WARNING: $@" >&2; }
 #   serve_static_string STRING
 #     Serves the specified static string with Content-Type text/plain.
 #
+#   serve_static_json STRING
+#     Serves the specified static string with Content-Type application/json.
+#
 # Examples of rules:
 #
 # on_uri_match '^/issue$' serve_file "/etc/issue"
@@ -78,7 +81,7 @@ warn() { echo "WARNING: $@" >&2; }
 #   paths relative to the specified "$DOCROOT"
 #
 
-unconditionally serve_static_string 'Hello, world!  You can configure bashttpd by modifying bashttpd.conf.'
+unconditionally serve_static_json '{"success": "true"}'
 
 # More about commands:
 #
@@ -112,9 +115,9 @@ send() { echo "> $@" >&2;
 
 DATE=$(date +"%a, %d %b %Y %H:%M:%S %Z")
 declare -a RESPONSE_HEADERS=(
-      "Date: $DATE"
-   "Expires: $DATE"
-    "Server: Slash Bin Slash Bash"
+		"Date: $DATE"
+		"Expires: $DATE"
+		"Server: BashAPI"
 )
 
 add_response_header() {
@@ -147,6 +150,15 @@ send_response_ok_exit() { send_response 200; exit 0; }
 fail_with() {
    send_response "$1" <<< "$1 ${HTTP_RESPONSE[$1]}"
    exit 1
+}
+
+serve_script() {
+   local script=$1
+
+   add_response_header "Content-Type"   "application/json";
+
+   /usr/bin/env $script | send_response_ok_exit
+   exit 0
 }
 
 serve_file() {
@@ -237,6 +249,33 @@ serve_static_string() {
    send_response_ok_exit <<< "$1"
 }
 
+serve_static_json() {
+   add_response_header "Content-Type" "application/json"
+   send_response_ok_exit <<< "$1"
+}
+
+uri_kvpair_split() {
+    local STRING=$1
+	if [ -n "${STRING}" ] ; then
+		local H=`echo $STRING | cut -f1 -d'&'`
+		local Hlen=$((`echo $H | wc -c`+1))
+		local Tail=`echo $STRING | cut -c ${Hlen}-`
+		local Key=`echo $H | cut -f1 -d'='`
+		local Val=`echo $H | cut -f2 -d'='`
+		export API_PARAM_$Key=$Val
+		API_PARAMINDEX+="API_PARAM_$Key"
+		uri_kvpair_split "$Tail"
+	fi
+}
+
+uri_parse() {
+	local STRING=$1
+	local NAME=`echo $STRING | cut -f1 -d'?'`
+	local PARAMS=`echo $STRING | cut -f2 -d'?'`
+	export API_NAME=$NAME
+	uri_kvpair_split "$PARAMS"
+}
+
 on_uri_match() {
    local regex=$1
    shift
@@ -248,6 +287,15 @@ on_uri_match() {
 unconditionally() {
    "$@" "$REQUEST_URI"
 }
+
+######################## START #########################
+
+# Prepare tempory store space
+STORE_SPACE=/tmp/bashapi_$BASHPID
+if [ -d $STORE_SPACE ] ; then
+	rm -rf $STORE_SPACE
+fi
+mkdir $STORE_SPACE
 
 # Request-Line HTTP RFC 2616 $5.1
 read -r line || fail_with 400
@@ -266,7 +314,10 @@ read -r REQUEST_METHOD REQUEST_URI REQUEST_HTTP_VERSION <<<"$line"
 # Only GET is supported at this time
 [ "$REQUEST_METHOD" = "GET" ] || fail_with 405
 
-declare -a REQUEST_HEADERS
+declare -a REQUEST_HEADERS API_PARAMINDEX
+
+uri_parse "${REQUEST_URI}"
+export API_PARAMINDEX
 
 while read -r line; do
    line=${line%%$'\r'}
